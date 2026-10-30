@@ -58,7 +58,7 @@ docker compose up --build -d --wait --wait-timeout 240
 
 浏览器打开 **http://localhost:3000**。首次构建会下载 Node、Java、MySQL 镜像和依赖，耗时取决于网络；慢速环境可增加等待时间。无需预先安装 Node、Java、Maven 或 MySQL，也无需外部 AI 凭据。
 
-- 唯一发布到宿主机的端口为 `127.0.0.1:3000`。
+- 默认发布到宿主机 `0.0.0.0:${WEB_PORT:-3000}`，VPS 上仍需要放行防火墙/安全组；只允许回环访问时设置 `WEB_HOST=127.0.0.1`。
 - 浏览器 `/api/*` → Next rewrites → Compose 内 `backend:8080` → `db:3306`。
 - Next 不执行业务，也不直接连接数据库。
 - `mysql-data` 保存 MySQL 数据；`material-data` 保存上传文件和成功结果。
@@ -81,12 +81,40 @@ docker compose down
 
 **不要在保留数据时加 `-v`。** 删除命名卷会清空数据库及素材，且数据库和文件必须成套备份、恢复。
 
+### VPS 公网访问
+
+默认绑定 `0.0.0.0`，VPS 可以从外部访问；如果 `.env` 里已经写了 `WEB_HOST=127.0.0.1`，需要改成 `0.0.0.0` 或删除该行。直接通过公网 IP + 端口演示时：
+
+1. 在项目目录确认 `.env`（没有则从 `.env.example` 复制），并按需设置：
+   ```dotenv
+   WEB_HOST=0.0.0.0
+   WEB_PORT=3000
+   ```
+2. 拉取最新代码后重建并启动：
+   ```bash
+   docker compose up --build -d --wait --wait-timeout 240
+   docker compose port frontend 3000
+   ```
+   输出应为 `0.0.0.0:3000` 或 `:::3000`。
+3. 在 VPS 防火墙和云厂商安全组放行 3000/TCP，例如 Ubuntu UFW：
+   ```bash
+   sudo ufw allow 3000/tcp
+   ```
+4. 在 VPS 上先验证：
+   ```bash
+   curl -I http://127.0.0.1:3000
+   ```
+   再从外部访问 `http://<VPS_IP>:3000`。
+
+更推荐用 Nginx/Caddy 反向代理到 `127.0.0.1:3000`，只开放 80/443，并启用 HTTPS；此时设置 `WEB_HOST=127.0.0.1`，HTTPS 下设置 `COOKIE_SECURE=true`。当前演示没有登录限流，直接把 3000 长期暴露在公网有风险。
+
 ### 配置
 
 默认值仅用于本地演示；`.env.example` 不包含真实凭据。需要覆盖时复制为 `.env` 并修改，不要提交实际凭据。
 
 | 配置 | 默认 | 用途 |
 | --- | --- | --- |
+| `WEB_HOST` | `0.0.0.0` | Compose 宿主机绑定地址；只允许回环访问时设为 `127.0.0.1` |
 | `WEB_PORT` | `3000` | Compose 宿主端口 |
 | `MYSQL_DATABASE` | `muse` | 数据库 |
 | `MYSQL_USER` | `muse` | 应用专用数据库用户 |
@@ -185,6 +213,7 @@ GitHub Actions 在 push / pull_request 时：
 1. Node 容器中执行 `npm ci`、lint、TypeScript 检查、Vitest、Next 构建。
 2. Maven / Java 容器中执行 `mvn verify`。
 3. 前两项通过后构建并启动 Compose，在真实 MySQL 上执行同一冒烟脚本；失败保存服务日志，最后停止容器。
+4. 完成后在 run 页面的 Artifacts 上传 `frontend-standalone`、`muse-backend-jar` 和 `backend-test-reports`；Docker 镜像不在 Artifacts 中，由评估者从源码构建。
 
 前端关键测试验证多任务互不串扰、单任务请求不重叠、终态停止轮询、异常保留旧状态、手动恢复、刷新竞态、提交任务不被旧历史覆盖、身份切换 / 卸载取消旧请求、根级 StrictMode 清理，以及 SessionProvider 的注册、登录、退出、改密、失败不覆盖会话和过期初始化响应。后端验证事务提交后调度、回滚不调度、每阶段状态先持久化再等待、各阶段失败中断、结果文件、所有权、上传真实内容及尺寸、队列拒绝、启动中断处理，以及账号注册认领、登录合并匿名作品、会话轮换、跨账号拒绝和改密吊销会话。
 
@@ -380,16 +409,16 @@ Task 示例结构（ID、时间仅为说明）：
 | Next 生产构建 | 通过：首页、历史静态输出，详情动态路由；standalone 输出可用 |
 | 干净源码包 | 解压后不带 `.next` / 构建缓存进行 TypeScript 检查，通过 |
 | Java `mvn verify` | **46 项通过**：43 项集成测试 + 3 项调度器测试，零失败 / 跳过 |
-| HTTP 冒烟 | 冒烟脚本覆盖账号注册、退出、登录、匿名作品合并和会话轮换；已通过 **Next 生产服务 → H2 测试后端 → smoke.mjs**，覆盖模板筛选、上传校验、三阶段边界、失败、身份隔离和账号链路。Compose / MySQL 冒烟尚未完成 |
+| HTTP 冒烟 | 冒烟脚本覆盖账号注册、退出、登录、匿名作品合并和会话轮换；已通过 **Next 生产服务 → H2 测试后端 → smoke.mjs**，并在 GitHub Actions 的 Compose + MySQL 链路成功运行过一次，覆盖模板筛选、上传校验、三阶段边界、失败、身份隔离和账号链路 |
 | 浏览器交互 | 已操作分类筛选、JPG 上传、非法格式拦截、双素材数量门槛与移除、提交、成功预览、指定生成阶段失败、刷新恢复、查询失败保留状态 / 手动恢复、身份确认切换；账号弹窗尚未在浏览器复验 |
 | 布局 | 485px 小屏无横向溢出；桌面模板网格和左右制作布局正常 |
 | 浏览器控制台 | 正常流程未发现 error / warn；查询异常已通过请求拦截验证 |
-| Compose / CI YAML | YAML 语法已检查；容器和 GitHub Actions 尚未完成完整运行 |
-| MySQL 8.4 联调 | 已在 MySQL 8.4 上验证 7 张表 / 6 个模板，上传、制作、刷新恢复通过。当前 schema 为 8 张表（新增 `accounts`）；账号功能加入后 MySQL 侧尚未复验，账号测试运行在 test-scope H2 |
+| Compose / CI | YAML 语法已检查；GitHub Actions 已成功运行过完整流程（含 Compose + MySQL 冒烟），当前提交状态以仓库 Actions 页面为准 |
+| MySQL 8.4 / CI | 当前 schema 为 8 张表（含 `accounts`）；GitHub Actions 的 Compose + MySQL 冒烟已覆盖上传、制作、账号注册 / 合并和结果访问。本地账号测试同时使用 test-scope H2 |
 
 已完成：前后端源码、模板 / 上传 / 三阶段任务 / 私有历史结果完整闭环、匿名身份隔离、邮箱账号注册 / 登录 / 退出 / 改密、匿名作品合并、会话轮换、响应式界面、核心测试、初始化 SQL、依赖锁文件、Dockerfile、Compose、CI 和本文要求的操作说明。
 
-未实现：真实 AI、邮箱验证 / 忘记密码 / 账号注销、分页 / 清理 / 限流、重启续跑、受理幂等和自动重试；未部署公网。Docker 容器和 GitHub Actions 尚未完成完整运行；账号表尚未在 MySQL 上复验，当前账号测试使用 H2。
+未实现：真实 AI、邮箱验证 / 忘记密码 / 账号注销、分页 / 清理 / 限流、重启续跑、受理幂等和自动重试；未做正式生产发布。Docker / GitHub Actions 的运行结果以仓库 Actions 和部署记录为准；浏览器账号弹窗仍建议手工验收。
 
 设计与取舍：优先事务边界、异常隔离和可重复测试；使用单线程队列和轻量账号系统代替分布式设施、完整账号体系；结果处理保持为真实文件复制。详细边界见上一节。
 

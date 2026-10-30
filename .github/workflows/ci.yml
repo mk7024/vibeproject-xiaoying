@@ -24,6 +24,14 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: 1
           JAVA_API_URL: http://backend:8080
+      - name: Package frontend standalone
+        run: tar -czf frontend-standalone.tgz -C . .next/standalone .next/static public scripts
+      - name: Upload frontend standalone
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-standalone
+          path: frontend/frontend-standalone.tgz
+          if-no-files-found: error
 
   backend:
     runs-on: ubuntu-latest
@@ -34,6 +42,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: mvn -B verify
+      - name: Upload backend jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-backend-jar
+          path: backend/target/muse-backend.jar
+          if-no-files-found: error
+      - name: Upload backend test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports
+          if-no-files-found: warn
 
   compose-smoke:
     runs-on: ubuntu-latest
