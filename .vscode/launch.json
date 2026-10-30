@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Debug Muse Backend (remote MySQL)",
+      "request": "launch",
+      "mainClass": "com.muse.api.MuseApplication",
+      "projectName": "muse-backend",
+      "cwd": "${workspaceFolder}",
+      "args": "--spring.profiles.active=local",
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node-terminal",
+      "name": "Develop Muse Frontend",
+      "request": "launch",
+      "command": "npm --prefix frontend run dev",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

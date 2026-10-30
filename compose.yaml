@@ -1,0 +1,75 @@
+name: muse-studio
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-muse}
+      MYSQL_USER: ${MYSQL_USER:-muse}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-demo-only-change-me}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-demo-root-change-me}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u$$MYSQL_USER -D $$MYSQL_DATABASE -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-muse}
+      MYSQL_USER: ${MYSQL_USER:-muse}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-demo-only-change-me}
+      STORAGE_PATH: /app/storage
+    volumes:
+      - material-data:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/health >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        JAVA_API_URL: http://backend:8080
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  frontend-checks:
+    profiles: ["test"]
+    build:
+      context: ./frontend
+      target: checks
+    command: ["npm", "test"]
+
+  backend-checks:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: build
+    command: ["mvn", "-B", "verify"]
+
+volumes:
+  mysql-data:
+  material-data:

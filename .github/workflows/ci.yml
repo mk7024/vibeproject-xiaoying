@@ -1,0 +1,51 @@
+name: Verify Muse Studio
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    container: node:24-bookworm
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          JAVA_API_URL: http://backend:8080
+
+  backend:
+    runs-on: ubuntu-latest
+    container: maven:3.9.9-eclipse-temurin-21
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - run: mvn -B verify
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    needs: [frontend, backend]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up --build -d --wait --wait-timeout 240
+      - name: Verify MySQL-backed API through Next
+        run: docker compose exec -T frontend node /app/scripts/smoke.mjs
+      - name: Capture service logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop containers
+        if: always()
+        run: docker compose down
