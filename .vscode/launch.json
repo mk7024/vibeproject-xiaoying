@@ -3,7 +3,7 @@
   "configurations": [
     {
       "type": "java",
-      "name": "Debug Muse Backend (remote MySQL)",
+      "name": "Debug Muse Backend",
       "request": "launch",
       "mainClass": "com.muse.api.MuseApplication",
       "projectName": "muse-backend",
